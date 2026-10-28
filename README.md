@@ -1,4 +1,4 @@
-# soko-timers
+# SOKO. Timers
 
 A small single page app with a pomodoro timer and the ability to add your own custom times. 
 * The status of each timer is shown in the list of timers so that you don't have to switch to each timer to see if its finished or not.
