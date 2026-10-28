@@ -615,9 +615,7 @@
           writeStorage(SELECTED_STORAGE_KEY, selectedId);
         }
         const state = timerState(timer.id);
-        state.deadline = null;
-        state.remainingSeconds = getCurrentDurationSeconds(timer, state);
-        state.status = "ready";
+        Object.assign(state, createTimerState(timer));
         if (!timers().some((item) => timerState(item.id).status === "running") && timerInterval !== null) {
           window.clearInterval(timerInterval);
           timerInterval = null;
@@ -673,7 +671,7 @@
       });
 
       elements.startButton.addEventListener("click", toggleTimer);
-      elements.resetButton.addEventListener("click", resetTimer);
+      elements.resetButton.addEventListener("click", () => resetTimer());
       elements.createButton.addEventListener("click", () => {
         elements.formError.hidden = true;
         elements.formError.textContent = "";
