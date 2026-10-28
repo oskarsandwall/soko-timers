@@ -268,6 +268,7 @@
 
       const POMODORO = { id: "pomodoro", name: "Pomodoro", minutes: 25, preset: true };
       const TIMER_STORAGE_KEY = "soko.custom-timers";
+      const TIMER_STATE_STORAGE_KEY = "soko.timer-states";
       const SELECTED_STORAGE_KEY = "soko.selected-timer";
       const elements = {
         timerCount: document.getElementById("timer-count"),
@@ -336,7 +337,7 @@
       const timers = () => [POMODORO, ...customTimers];
       let selectedId = readStorage(SELECTED_STORAGE_KEY) || POMODORO.id;
       if (!timers().some((timer) => timer.id === selectedId)) selectedId = POMODORO.id;
-      const timerStates = new Map(timers().map((timer) => [timer.id, createTimerState(timer)]));
+      const timerStates = loadTimerStates();
       let timerInterval = null;
       let audioContext = null;
 
@@ -352,6 +353,44 @@
           phase: "focus",
           completedFocusSessions: 0
         };
+      }
+
+      function loadTimerStates() {
+        const states = new Map(timers().map((timer) => [timer.id, createTimerState(timer)]));
+        let savedStates;
+        try {
+          savedStates = JSON.parse(readStorage(TIMER_STATE_STORAGE_KEY) || "{}");
+        } catch {
+          return states;
+        }
+        if (!savedStates || typeof savedStates !== "object" || Array.isArray(savedStates)) return states;
+
+        timers().forEach((timer) => {
+          const saved = savedStates[timer.id];
+          if (!saved || typeof saved !== "object" || Array.isArray(saved)) return;
+          if (!["ready", "running", "paused", "complete"].includes(saved.status)) return;
+          if (!["focus", "short-break", "long-break"].includes(saved.phase)) return;
+          if (!timer.preset && (saved.phase !== "focus" || saved.completedFocusSessions !== 0)) return;
+          if (!Number.isInteger(saved.completedFocusSessions) || saved.completedFocusSessions < 0) return;
+          if (!Number.isInteger(saved.remainingSeconds) || saved.remainingSeconds < 0) return;
+          if (saved.status === "running" && !Number.isFinite(saved.deadline)) return;
+
+          const durationSeconds = timer.preset
+            ? saved.phase === "short-break" ? 5 * 60 : saved.phase === "long-break" ? 15 * 60 : 25 * 60
+            : timer.minutes * 60;
+          if (saved.remainingSeconds > durationSeconds) return;
+
+          states.set(timer.id, {
+            status: saved.status,
+            remainingSeconds: saved.status === "running"
+              ? Math.min(durationSeconds, Math.max(0, Math.ceil((saved.deadline - Date.now()) / 1000)))
+              : saved.remainingSeconds,
+            deadline: saved.status === "running" ? saved.deadline : null,
+            phase: saved.phase,
+            completedFocusSessions: saved.completedFocusSessions
+          });
+        });
+        return states;
       }
 
       function timerState(timerId = selectedId) {
@@ -379,6 +418,15 @@
       }
 
       function persistTimers() { writeStorage(TIMER_STORAGE_KEY, JSON.stringify(customTimers)); }
+
+      function persistTimerStates() {
+        const savedStates = Object.create(null);
+        timers().forEach((timer) => {
+          const { status, remainingSeconds, deadline, phase, completedFocusSessions } = timerState(timer.id);
+          savedStates[timer.id] = { status, remainingSeconds, deadline, phase, completedFocusSessions };
+        });
+        writeStorage(TIMER_STATE_STORAGE_KEY, JSON.stringify(savedStates));
+      }
 
       function renderTimerList() {
         elements.timerList.replaceChildren();
@@ -542,6 +590,7 @@
         } else {
           state.remainingSeconds = 0;
         }
+        persistTimerStates();
         renderTimerList();
         if (timerId === selectedId) updateDisplay();
         playCompletionChime(isBreakComplete);
@@ -604,6 +653,7 @@
           state.deadline = Date.now() + state.remainingSeconds * 1000;
           if (timerInterval === null) timerInterval = window.setInterval(tick, 200);
         }
+        persistTimerStates();
         renderTimerList();
         updateDisplay();
       }
@@ -617,6 +667,7 @@
         }
         const state = timerState(timer.id);
         Object.assign(state, createTimerState(timer));
+        persistTimerStates();
         if (!timers().some((item) => timerState(item.id).status === "running") && timerInterval !== null) {
           window.clearInterval(timerInterval);
           timerInterval = null;
@@ -633,6 +684,7 @@
         customTimers.push(timer);
         timerStates.set(timer.id, createTimerState(timer));
         persistTimers();
+        persistTimerStates();
         chooseTimer(timer);
         elements.createDialog.close();
         elements.createForm.reset();
@@ -645,6 +697,7 @@
         customTimers.splice(index, 1);
         timerStates.delete(id);
         persistTimers();
+        persistTimerStates();
         if (selectedId === id) chooseTimer(POMODORO);
         else render();
         if (!timers().some((timer) => timerState(timer.id).status === "running") && timerInterval !== null) {
@@ -704,6 +757,11 @@
       });
 
       render();
+      persistTimerStates();
+      if (timers().some((timer) => timerState(timer.id).status === "running")) {
+        timerInterval = window.setInterval(tick, 200);
+        tick();
+      }
     })();
   </script>
 </body>
