@@ -59,11 +59,11 @@
     .add-button span { margin-top: -3px; font-size: 25px; font-weight: 300; line-height: 1; }
     .list-label { margin: 0 0 11px; padding-left: 13px; color: #8d9992; font: 9px var(--mono); letter-spacing: 1.4px; }
     .timer-list { display: flex; flex-direction: column; gap: 4px; }
-    .timer-row { display: flex; align-items: center; min-height: 74px; padding: 0 7px 0 0; border-radius: 3px; transition: background 180ms ease; }
+    .timer-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; grid-template-rows: auto auto; min-height: 74px; padding: 0 7px 0 0; border-radius: 3px; transition: background 180ms ease; }
     .timer-row.is-selected { background: #e6eee8; }
     .timer-row.is-complete { background: #f8e5de; box-shadow: inset 3px 0 var(--coral); }
     .timer-row.is-complete.is-selected { background: #f1d8ce; }
-    .timer-select { min-width: 0; flex: 1; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+    .timer-select { grid-column: 1; grid-row: 1; min-width: 0; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 0; background: transparent; text-align: left; cursor: pointer; }
     .timer-index { width: 26px; color: #94a099; font: 10px var(--mono); }
     .preset-index { color: var(--coral); }
     .timer-name-wrap { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 3px; }
@@ -77,8 +77,12 @@
     .timer-state.state-paused .timer-state-dot { background: #d3a24f; }
     .timer-state.state-complete { color: #738178; }
     .timer-state.state-complete .timer-state-dot { background: var(--coral); }
+    .timer-sound-settings { grid-column: 1; grid-row: 2; display: flex; align-items: center; gap: 6px; padding: 0 8px 7px 12px; color: #74847b; font: 9px var(--mono); white-space: nowrap; }
+    .timer-sound-settings select { width: 68px; min-width: 0; padding: 2px 3px; border: 1px solid #cbd6cf; border-radius: 3px; background: #f3f7f4; color: #36463e; font: 9px "Segoe UI", sans-serif; }
+    .timer-loop-setting { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; }
+    .timer-loop-setting input { width: 12px; height: 12px; margin: 0; accent-color: var(--green); }
     .selected-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
-    .delete-button { width: 28px; height: 32px; border: 0; background: transparent; color: #9aa69e; font-size: 20px; cursor: pointer; opacity: 0; transition: opacity 150ms ease, color 150ms ease; }
+    .delete-button { grid-column: 2; grid-row: 1 / span 2; width: 28px; height: 32px; border: 0; background: transparent; color: #9aa69e; font-size: 20px; cursor: pointer; opacity: 0; transition: opacity 150ms ease, color 150ms ease; }
     .timer-row:hover .delete-button, .delete-button:focus-visible { opacity: 1; }
     .delete-button:hover { color: var(--coral); }
     .sidebar-note { display: flex; gap: 12px; align-items: flex-start; margin-top: auto; padding: 18px 0 4px 11px; border-top: 1px solid var(--line); }
@@ -150,7 +154,7 @@
       .sidebar-heading { margin-bottom: 20px; }
       .timer-list { width: 100%; min-width: 0; flex-direction: row; overflow-x: auto; gap: 8px; padding: 0 0 4px; }
       .list-label { display: none; }
-      .timer-row { min-width: 154px; border: 1px solid transparent; }
+      .timer-row { min-width: 220px; border: 1px solid transparent; }
       .timer-row.is-selected { border-color: #d4dfd7; }
       .timer-select { gap: 7px; padding: 8px; }
       .timer-index { width: 22px; }
@@ -338,6 +342,7 @@
       let selectedId = readStorage(SELECTED_STORAGE_KEY) || POMODORO.id;
       if (!timers().some((timer) => timer.id === selectedId)) selectedId = POMODORO.id;
       const timerStates = loadTimerStates();
+      const completionLoops = new Map();
       let timerInterval = null;
       let audioContext = null;
 
@@ -351,7 +356,9 @@
           remainingSeconds: (timer.preset ? 25 : timer.minutes) * 60,
           deadline: null,
           phase: "focus",
-          completedFocusSessions: 0
+          completedFocusSessions: 0,
+          soundVolume: "low",
+          loopSound: false
         };
       }
 
@@ -387,7 +394,9 @@
               : saved.remainingSeconds,
             deadline: saved.status === "running" ? saved.deadline : null,
             phase: saved.phase,
-            completedFocusSessions: saved.completedFocusSessions
+            completedFocusSessions: saved.completedFocusSessions,
+            soundVolume: ["low", "medium", "high"].includes(saved.soundVolume) ? saved.soundVolume : "low",
+            loopSound: typeof saved.loopSound === "boolean" ? saved.loopSound : false
           });
         });
         return states;
@@ -422,8 +431,8 @@
       function persistTimerStates() {
         const savedStates = Object.create(null);
         timers().forEach((timer) => {
-          const { status, remainingSeconds, deadline, phase, completedFocusSessions } = timerState(timer.id);
-          savedStates[timer.id] = { status, remainingSeconds, deadline, phase, completedFocusSessions };
+          const { status, remainingSeconds, deadline, phase, completedFocusSessions, soundVolume, loopSound } = timerState(timer.id);
+          savedStates[timer.id] = { status, remainingSeconds, deadline, phase, completedFocusSessions, soundVolume, loopSound };
         });
         writeStorage(TIMER_STATE_STORAGE_KEY, JSON.stringify(savedStates));
       }
@@ -477,6 +486,38 @@
             selectButton.append(selectedDot);
           }
           row.append(selectButton);
+
+          const soundSettings = document.createElement("div");
+          soundSettings.className = "timer-sound-settings";
+          const volumeLabel = document.createElement("label");
+          volumeLabel.textContent = "Sound";
+          const volumeSelect = document.createElement("select");
+          volumeSelect.dataset.action = "volume";
+          volumeSelect.dataset.id = timer.id;
+          volumeSelect.setAttribute("aria-label", `Notification volume for ${timer.name}`);
+          ["high", "medium", "low"].forEach((volume) => {
+            const option = document.createElement("option");
+            option.value = volume;
+            option.textContent = volume[0].toUpperCase() + volume.slice(1);
+            option.selected = state.soundVolume === volume;
+            volumeSelect.append(option);
+          });
+          volumeLabel.append(volumeSelect);
+
+          const loopLabel = document.createElement("label");
+          loopLabel.className = "timer-loop-setting";
+          const loopInput = document.createElement("input");
+          loopInput.type = "checkbox";
+          loopInput.dataset.action = "loop-sound";
+          loopInput.dataset.id = timer.id;
+          loopInput.checked = state.loopSound;
+          loopInput.title = "Repeat the notification until this timer is reset or started again";
+          loopInput.setAttribute("aria-label", `Loop notification sound for ${timer.name}`);
+          const loopText = document.createElement("span");
+          loopText.textContent = "Loop";
+          loopLabel.append(loopInput, loopText);
+          soundSettings.append(volumeLabel, loopLabel);
+          row.append(soundSettings);
 
           if (!timer.preset) {
             const deleteButton = document.createElement("button");
@@ -545,14 +586,23 @@
         return audioContext;
       }
 
-      function playCompletionChime(isBreakComplete) {
+      function stopCompletionLoop(timerId) {
+        const interval = completionLoops.get(timerId);
+        if (interval === undefined) return;
+        window.clearInterval(interval);
+        completionLoops.delete(timerId);
+      }
+
+      function playCompletionChimeOnce(isBreakComplete, soundVolume) {
         const context = prepareAudio();
         if (!context) return;
 
         const notes = isBreakComplete
           ? [{ frequency: 660, offset: 0 }, { frequency: 830, offset: 0.16 }, { frequency: 1046, offset: 0.32 }]
           : [{ frequency: 740, offset: 0 }, { frequency: 740, offset: 0.36 }, { frequency: 740, offset: 0.72 }];
-        const volume = isBreakComplete ? 0.1 : 0.035;
+        const baseVolume = isBreakComplete ? 0.1 : 0.035;
+        const volumeMultiplier = soundVolume === "high" ? 3 : soundVolume === "medium" ? 2 : 1;
+        const volume = baseVolume * volumeMultiplier;
         const start = context.currentTime + 0.02;
 
         notes.forEach((note) => {
@@ -570,6 +620,24 @@
           oscillator.start(noteStart);
           oscillator.stop(noteStart + duration + 0.02);
         });
+      }
+
+      function playCompletionChime(timerId, isBreakComplete) {
+        const state = timerState(timerId);
+        if (!state) return;
+        playCompletionChimeOnce(isBreakComplete, state.soundVolume);
+        if (!state.loopSound || completionLoops.has(timerId)) return;
+
+        const repeatDelay = isBreakComplete ? 1100 : 1400;
+        const interval = window.setInterval(() => {
+          const currentState = timerState(timerId);
+          if (!currentState || currentState.status !== "complete" || !currentState.loopSound) {
+            stopCompletionLoop(timerId);
+            return;
+          }
+          playCompletionChimeOnce(isBreakComplete, currentState.soundVolume);
+        }, repeatDelay);
+        completionLoops.set(timerId, interval);
       }
 
       function finishTimer(timerId) {
@@ -593,7 +661,7 @@
         persistTimerStates();
         renderTimerList();
         if (timerId === selectedId) updateDisplay();
-        playCompletionChime(isBreakComplete);
+        playCompletionChime(timerId, isBreakComplete);
       }
 
       function tick() {
@@ -640,6 +708,7 @@
       function toggleTimer() {
         const timer = selectedTimer();
         const state = timerState(timer.id);
+        stopCompletionLoop(timer.id);
         if (state.status === "running") {
           state.remainingSeconds = Math.max(0, Math.ceil((state.deadline - Date.now()) / 1000));
           state.deadline = null;
@@ -666,7 +735,11 @@
           writeStorage(SELECTED_STORAGE_KEY, selectedId);
         }
         const state = timerState(timer.id);
-        Object.assign(state, createTimerState(timer));
+        stopCompletionLoop(timer.id);
+        Object.assign(state, createTimerState(timer), {
+          soundVolume: state.soundVolume,
+          loopSound: state.loopSound
+        });
         persistTimerStates();
         if (!timers().some((item) => timerState(item.id).status === "running") && timerInterval !== null) {
           window.clearInterval(timerInterval);
@@ -694,6 +767,7 @@
       function deleteTimer(id) {
         const index = customTimers.findIndex((timer) => timer.id === id);
         if (index === -1) return;
+        stopCompletionLoop(id);
         customTimers.splice(index, 1);
         timerStates.delete(id);
         persistTimers();
@@ -715,9 +789,29 @@
         if (button.dataset.action === "delete") deleteTimer(timer.id);
       });
 
+      elements.timerList.addEventListener("change", (event) => {
+        const control = event.target.closest("[data-action]");
+        if (!control) return;
+        const timer = timers().find((item) => item.id === control.dataset.id);
+        if (!timer) return;
+        const state = timerState(timer.id);
+        if (control.dataset.action === "volume" && ["high", "medium", "low"].includes(control.value)) {
+          state.soundVolume = control.value;
+        } else if (control.dataset.action === "loop-sound") {
+          state.loopSound = control.checked;
+          if (!state.loopSound) stopCompletionLoop(timer.id);
+          else if (state.status === "complete") {
+            playCompletionChime(timer.id, timer.preset && state.phase === "focus");
+          }
+        } else {
+          return;
+        }
+        persistTimerStates();
+      });
+
       elements.timerList.addEventListener("dblclick", (event) => {
         const row = event.target.closest(".timer-row");
-        if (!row || event.target.closest(".delete-button")) return;
+        if (!row || event.target.closest(".delete-button, .timer-sound-settings")) return;
         const button = row.querySelector('button[data-action="select"]');
         if (!button) return;
         event.preventDefault();
@@ -757,6 +851,12 @@
       });
 
       render();
+      timers().forEach((timer) => {
+        const state = timerState(timer.id);
+        if (state.status === "complete" && state.loopSound) {
+          playCompletionChime(timer.id, timer.preset && state.phase === "focus");
+        }
+      });
       persistTimerStates();
       if (timers().some((timer) => timerState(timer.id).status === "running")) {
         timerInterval = window.setInterval(tick, 200);
